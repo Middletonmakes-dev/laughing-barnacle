@@ -238,9 +238,17 @@ Orientation::Orientation()
   : fwdBodyValid(false), hasReference(false),
     lastRawPan(0.0f), lastRawTilt(0.0f),
     unwrappedPan(0.0f), unwrappedTilt(0.0f),
-    offsetPan(0.0f), offsetTilt(0.0f) {
+    offsetPan(0.0f), offsetTilt(0.0f),
+    rawLevelX(0.0f), rawLevelY(0.0f),
+    levelOffsetX(0.0f), levelOffsetY(0.0f),
+    levelBasisValid(false), accelGravValid(false) {
   fwdBody[0] = 1.0f; fwdBody[1] = 0.0f; fwdBody[2] = 0.0f;
   refFwdWorld[0] = 1.0f; refFwdWorld[1] = 0.0f; refFwdWorld[2] = 0.0f;
+  refGravBody[0] = 0.0f; refGravBody[1] = 0.0f; refGravBody[2] = -1.0f;
+  levelAxisXBody[0] = 1.0f; levelAxisXBody[1] = 0.0f; levelAxisXBody[2] = 0.0f;
+  levelAxisYBody[0] = 0.0f; levelAxisYBody[1] = 1.0f; levelAxisYBody[2] = 0.0f;
+  accelGravBody[0] = 0.0f; accelGravBody[1] = 0.0f; accelGravBody[2] = -1.0f;
+  accelGravValid = false;
 }
 
 void Orientation::begin(float samplePeriodSec) {
@@ -253,8 +261,18 @@ void Orientation::begin(float samplePeriodSec) {
   unwrappedTilt = 0.0f;
   offsetPan = 0.0f;
   offsetTilt = 0.0f;
+  rawLevelX = 0.0f;
+  rawLevelY = 0.0f;
+  levelOffsetX = 0.0f;
+  levelOffsetY = 0.0f;
+  levelBasisValid = false;
   fwdBody[0] = 1.0f; fwdBody[1] = 0.0f; fwdBody[2] = 0.0f;
   refFwdWorld[0] = 1.0f; refFwdWorld[1] = 0.0f; refFwdWorld[2] = 0.0f;
+  refGravBody[0] = 0.0f; refGravBody[1] = 0.0f; refGravBody[2] = -1.0f;
+  levelAxisXBody[0] = 1.0f; levelAxisXBody[1] = 0.0f; levelAxisXBody[2] = 0.0f;
+  levelAxisYBody[0] = 0.0f; levelAxisYBody[1] = 1.0f; levelAxisYBody[2] = 0.0f;
+  accelGravBody[0] = 0.0f; accelGravBody[1] = 0.0f; accelGravBody[2] = -1.0f;
+  accelGravValid = false;
 }
 
 void Orientation::update(float gxDeg, float gyDeg, float gzDeg,
@@ -271,6 +289,60 @@ void Orientation::update(float gxDeg, float gyDeg, float gzDeg,
   // Get current quaternion
   float curQ[4];
   filter.getQuaternion(curQ[0], curQ[1], curQ[2], curQ[3]);
+
+  // --- Display spirit-level calculation (yaw-independent) ---
+  // Rotate world gravity [0,0,-1] into body frame.
+  // This gives tilt around board axes without yaw coupling/drift.
+  float gravWorld[3] = {0.0f, 0.0f, -1.0f};
+  float qConj[4];
+  quatConjugate(curQ, qConj);
+  float gravBody[3];
+  rotateVectorByQuat(qConj, gravWorld, gravBody);
+
+  // Build low-pass gravity estimate directly from accelerometer (body frame).
+  // This keeps UI bubble independent from gyro/yaw drift and magnetometer absence.
+  float accNorm = sqrtf(ax * ax + ay * ay + az * az);
+  if (accNorm > 1e-6f) {
+    float accNx = ax / accNorm;
+    float accNy = ay / accNorm;
+    float accNz = az / accNorm;
+
+    if (accNorm >= HtConfig::LEVEL_UI_ACCEL_NORM_MIN &&
+        accNorm <= HtConfig::LEVEL_UI_ACCEL_NORM_MAX) {
+      float a = HtConfig::LEVEL_UI_ACCEL_LPF_ALPHA;
+      accelGravBody[0] = (1.0f - a) * accelGravBody[0] + a * accNx;
+      accelGravBody[1] = (1.0f - a) * accelGravBody[1] + a * accNy;
+      accelGravBody[2] = (1.0f - a) * accelGravBody[2] + a * accNz;
+
+      float gLpNorm = sqrtf(accelGravBody[0]*accelGravBody[0] +
+                            accelGravBody[1]*accelGravBody[1] +
+                            accelGravBody[2]*accelGravBody[2]);
+      if (gLpNorm > 1e-6f) {
+        accelGravBody[0] /= gLpNorm;
+        accelGravBody[1] /= gLpNorm;
+        accelGravBody[2] /= gLpNorm;
+        accelGravValid = true;
+      }
+    }
+  }
+
+  const float* uiGrav = accelGravValid ? accelGravBody : gravBody;
+
+  if (levelBasisValid) {
+    // Project gravity onto re-level tangent axes.
+    float dotRef = uiGrav[0] * refGravBody[0] +
+                   uiGrav[1] * refGravBody[1] +
+                   uiGrav[2] * refGravBody[2];
+    float sinX = uiGrav[0] * levelAxisXBody[0] +
+                 uiGrav[1] * levelAxisXBody[1] +
+                 uiGrav[2] * levelAxisXBody[2];
+    float sinY = uiGrav[0] * levelAxisYBody[0] +
+                 uiGrav[1] * levelAxisYBody[1] +
+                 uiGrav[2] * levelAxisYBody[2];
+
+    rawLevelX = atan2f(sinX, dotRef);
+    rawLevelY = atan2f(sinY, dotRef);
+  }
 
   // Rotate fwdBody by current quaternion to get current forward in world frame
   float curFwd[3];
@@ -395,12 +467,87 @@ void Orientation::reLevel() {
   unwrappedTilt = currentTilt;
   offsetPan = 0.0f;
   offsetTilt = currentTilt;  // so getAngles returns tilt=0 right after reLevel
+
+  // Capture gravity reference in body frame for spirit-level axis basis
+  float gravWorld2[3] = {0.0f, 0.0f, -1.0f};
+  float qConj2[4];
+  quatConjugate(curQ, qConj2);
+  float gravBody2[3];
+  rotateVectorByQuat(qConj2, gravWorld2, gravBody2);
+
+  // Normalize reference gravity (prefer accel LP estimate if valid)
+  float gRef[3] = {gravBody2[0], gravBody2[1], gravBody2[2]};
+  if (accelGravValid) {
+    gRef[0] = accelGravBody[0];
+    gRef[1] = accelGravBody[1];
+    gRef[2] = accelGravBody[2];
+  }
+  float gNorm = sqrtf(gRef[0]*gRef[0] + gRef[1]*gRef[1] + gRef[2]*gRef[2]);
+  if (gNorm > 1e-6f) {
+    refGravBody[0] = gRef[0] / gNorm;
+    refGravBody[1] = gRef[1] / gNorm;
+    refGravBody[2] = gRef[2] / gNorm;
+  }
+
+  // Build tangent basis at reference gravity direction
+  float candidateX[3] = {1.0f, 0.0f, 0.0f};
+  float dotGX = candidateX[0]*refGravBody[0] + candidateX[1]*refGravBody[1] + candidateX[2]*refGravBody[2];
+  if (fabs(dotGX) > 0.9f) {
+    candidateX[0] = 0.0f; candidateX[1] = 1.0f; candidateX[2] = 0.0f;
+    dotGX = candidateX[0]*refGravBody[0] + candidateX[1]*refGravBody[1] + candidateX[2]*refGravBody[2];
+  }
+
+  levelAxisXBody[0] = candidateX[0] - dotGX * refGravBody[0];
+  levelAxisXBody[1] = candidateX[1] - dotGX * refGravBody[1];
+  levelAxisXBody[2] = candidateX[2] - dotGX * refGravBody[2];
+  float xNorm = sqrtf(levelAxisXBody[0]*levelAxisXBody[0] + levelAxisXBody[1]*levelAxisXBody[1] + levelAxisXBody[2]*levelAxisXBody[2]);
+  if (xNorm > 1e-6f) {
+    levelAxisXBody[0] /= xNorm;
+    levelAxisXBody[1] /= xNorm;
+    levelAxisXBody[2] /= xNorm;
+  }
+
+  // Y axis = refGrav x X (right-handed basis in tangent plane)
+  levelAxisYBody[0] = refGravBody[1]*levelAxisXBody[2] - refGravBody[2]*levelAxisXBody[1];
+  levelAxisYBody[1] = refGravBody[2]*levelAxisXBody[0] - refGravBody[0]*levelAxisXBody[2];
+  levelAxisYBody[2] = refGravBody[0]*levelAxisXBody[1] - refGravBody[1]*levelAxisXBody[0];
+  float yNorm = sqrtf(levelAxisYBody[0]*levelAxisYBody[0] + levelAxisYBody[1]*levelAxisYBody[1] + levelAxisYBody[2]*levelAxisYBody[2]);
+  if (yNorm > 1e-6f) {
+    levelAxisYBody[0] /= yNorm;
+    levelAxisYBody[1] /= yNorm;
+    levelAxisYBody[2] /= yNorm;
+    levelBasisValid = true;
+  } else {
+    levelBasisValid = false;
+  }
+
+  // Update and zero spirit-level state at re-level point
+  if (levelBasisValid) {
+    rawLevelX = 0.0f;
+    rawLevelY = 0.0f;
+  }
+  levelOffsetX = rawLevelX;
+  levelOffsetY = rawLevelY;
 }
 
 void Orientation::getAngles(float &pan, float &tilt, float &unused) const {
   pan = unwrappedPan - offsetPan;
   tilt = unwrappedTilt - offsetTilt;
   unused = 0.0f;
+}
+
+void Orientation::getLevelVector(float &x, float &y) const {
+  float lx = rawLevelX - levelOffsetX;
+  float ly = rawLevelY - levelOffsetY;
+
+  if (HtConfig::LEVEL_UI_SWAP_AXES) {
+    float tmp = lx;
+    lx = ly;
+    ly = tmp;
+  }
+
+  x = lx * HtConfig::LEVEL_UI_X_SIGN;
+  y = ly * HtConfig::LEVEL_UI_Y_SIGN;
 }
 
 void Orientation::getOffsets(float &panOff, float &tiltOff, float &unused) const {

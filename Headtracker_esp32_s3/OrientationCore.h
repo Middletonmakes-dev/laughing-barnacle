@@ -83,6 +83,10 @@ public:
   // pan = first param, tilt = second param, third = 0 (API compat)
   void getAngles(float &pan, float &tilt, float &unused) const;
 
+  // Get display level angles (radians) from gravity in board/screen frame.
+  // These are yaw-independent and intended for the on-screen spirit-level UI.
+  void getLevelVector(float &x, float &y) const;
+
   // Get current offset values
   void getOffsets(float &panOff, float &tiltOff, float &unused) const;
 
@@ -112,6 +116,22 @@ private:
   // Re-level offsets (so getAngles returns 0 right after reLevel)
   float offsetPan;
   float offsetTilt;
+
+  // Display spirit-level state (gravity-derived, yaw-independent)
+  float rawLevelX;
+  float rawLevelY;
+  float levelOffsetX;
+  float levelOffsetY;
+
+  // Display level reference basis captured at re-level for robust axis decoupling
+  float refGravBody[3];
+  float levelAxisXBody[3];
+  float levelAxisYBody[3];
+  bool levelBasisValid;
+
+  // Low-pass gravity estimate directly from accelerometer for robust UI leveling
+  float accelGravBody[3];
+  bool accelGravValid;
 
   // ---- Quaternion math helpers (static, pure functions) ----
 

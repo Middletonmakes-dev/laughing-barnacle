@@ -1,7 +1,8 @@
 // Display.cpp - GC9A01 round display rendering implementation
 #include "Display.h"
 
-Display::Display() : tft(), sprite(&tft), currentMode(DisplayMode::BOOT) {
+Display::Display() : tft(), sprite(&tft), currentMode(DisplayMode::BOOT),
+                     levelEdgeLock(false), levelLockXDeg(0.0f), levelLockYDeg(0.0f) {
 }
 
 void Display::begin() {
@@ -68,8 +69,8 @@ void Display::drawBootScreen(float calibProgress, const char* version) {
   sprite.pushSprite(0, 0);
 }
 
-void Display::drawTrackingScreen(float panAngleDeg, float tiltAngleDeg,
-                                  float panGain, float tiltGain,
+void Display::drawTrackingScreen(float levelXDeg, float levelYDeg,
+                                  float calGx, float calGy, float calGz,
                                   bool gyroStable, float voltage) {
   sprite.fillSprite(COLOR_BG);
 
@@ -78,17 +79,21 @@ void Display::drawTrackingScreen(float panAngleDeg, float tiltAngleDeg,
   drawCrosshair(CX, CY, trackRadius);
 
   // Tracking dot
-  drawTrackingDot(panAngleDeg, tiltAngleDeg, trackRadius);
+  drawTrackingDot(levelXDeg, levelYDeg, trackRadius);
 
   // Power arc at top
   drawPowerArc(voltage);
 
-  // Gain values (bottom area)
+  // Debug values (bottom area)
   sprite.setTextSize(1);
   sprite.setTextColor(COLOR_DIM);
-  char gainStr[32];
-  snprintf(gainStr, sizeof(gainStr), "P:%.1f  T:%.1f", panGain, tiltGain);
-  sprite.drawString(gainStr, CX, 200);
+  char line1[48];
+  snprintf(line1, sizeof(line1), "Lx:%5.1f  Ly:%5.1f", levelXDeg, levelYDeg);
+  sprite.drawString(line1, CX, 196);
+
+  char line2[48];
+  snprintf(line2, sizeof(line2), "G:%5.1f %5.1f %5.1f", calGx, calGy, calGz);
+  sprite.drawString(line2, CX, 210);
 
   // Status dot and label
   drawStatusDot(gyroStable, DisplayMode::NORMAL);
@@ -191,7 +196,39 @@ void Display::drawCrosshair(int cx, int cy, int radius) {
 }
 
 void Display::drawTrackingDot(float panDeg, float tiltDeg, int radius) {
-  // Map angle to pixel position
+  // Small deadband to reduce jitter while holding still
+  if (fabs(panDeg) < HtConfig::LEVEL_UI_DEADBAND_DEG) panDeg = 0.0f;
+  if (fabs(tiltDeg) < HtConfig::LEVEL_UI_DEADBAND_DEG) tiltDeg = 0.0f;
+
+  // Edge-lock behavior to avoid circling when level approaches singular/extreme poses
+  float magDeg = sqrtf(panDeg * panDeg + tiltDeg * tiltDeg);
+  if (magDeg > HtConfig::LEVEL_UI_MAX_DEG) {
+    float norm = max(1e-6f, magDeg);
+    panDeg = panDeg / norm * HtConfig::LEVEL_UI_MAX_DEG;
+    tiltDeg = tiltDeg / norm * HtConfig::LEVEL_UI_MAX_DEG;
+    magDeg = HtConfig::LEVEL_UI_MAX_DEG;
+  }
+  if (!levelEdgeLock && magDeg >= HtConfig::LEVEL_UI_EDGE_LOCK_ENTER_DEG) {
+    levelEdgeLock = true;
+    float norm = max(1e-6f, magDeg);
+    float clampMag = min(magDeg, 90.0f);
+    levelLockXDeg = panDeg / norm * clampMag;
+    levelLockYDeg = tiltDeg / norm * clampMag;
+  } else if (levelEdgeLock && magDeg <= HtConfig::LEVEL_UI_EDGE_LOCK_EXIT_DEG) {
+    levelEdgeLock = false;
+  }
+
+  // Always clear lock near center after re-level to avoid stale edge direction
+  if (magDeg < 5.0f) {
+    levelEdgeLock = false;
+  }
+
+  if (levelEdgeLock) {
+    panDeg = levelLockXDeg;
+    tiltDeg = levelLockYDeg;
+  }
+
+  // Map level angle to pixel position
   // +/-90 degrees maps to full radius
   float maxDeg = 90.0f;
   int dotX = CX + (int)(panDeg / maxDeg * radius);
