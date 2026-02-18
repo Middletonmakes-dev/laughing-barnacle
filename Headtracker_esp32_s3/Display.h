@@ -28,12 +28,12 @@ public:
   void drawBootScreen(float calibProgress, const char* version);
 
   // Draw normal tracking screen
-  // panAngleDeg/tiltAngleDeg: current tracking angles in degrees
-  // panGain/tiltGain: current gain values for info display
+  // levelXDeg/levelYDeg: spirit-level offsets in degrees (display frame)
+  // calGx/calGy/calGz: calibrated gyro rates (deg/s) for debugging
   // gyroStable: calibration status
   // voltage: power supply voltage
-  void drawTrackingScreen(float panAngleDeg, float tiltAngleDeg,
-                          float panGain, float tiltGain,
+  void drawTrackingScreen(float levelXDeg, float levelYDeg,
+                          float calGx, float calGy, float calGz,
                           bool gyroStable, float voltage);
 
   // Draw gain adjustment screen
