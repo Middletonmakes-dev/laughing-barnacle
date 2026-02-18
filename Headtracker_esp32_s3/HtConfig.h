@@ -137,7 +137,7 @@ namespace HtConfig {
   // Keep this separate from ELRS pan/tilt mapping.
   const bool  LEVEL_UI_SWAP_AXES = false;
   const float LEVEL_UI_X_SIGN    = 1.0f;
-  const float LEVEL_UI_Y_SIGN    = -1.0f;
+  const float LEVEL_UI_Y_SIGN    = 1.0f;
 
   // ========== LEDC Channels (v2.x API: channel-based) ==========
   const int BUZZER_LEDC_CHANNEL    = 0;
