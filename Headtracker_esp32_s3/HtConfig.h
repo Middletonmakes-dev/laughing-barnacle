@@ -132,6 +132,13 @@ namespace HtConfig {
   const int LCD_WIDTH  = 240;
   const int LCD_HEIGHT = 240;
 
+  // ========== Spirit-level UI mapping ==========
+  // Maps board-frame level angles to display X/Y bubble movement.
+  // Keep this separate from ELRS pan/tilt mapping.
+  const bool  LEVEL_UI_SWAP_AXES = false;
+  const float LEVEL_UI_X_SIGN    = 1.0f;
+  const float LEVEL_UI_Y_SIGN    = -1.0f;
+
   // ========== LEDC Channels (v2.x API: channel-based) ==========
   const int BUZZER_LEDC_CHANNEL    = 0;
   const int BACKLIGHT_LEDC_CHANNEL = 1;

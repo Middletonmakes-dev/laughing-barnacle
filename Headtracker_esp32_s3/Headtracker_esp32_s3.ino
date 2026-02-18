@@ -47,13 +47,14 @@ volatile AppMode currentMode = AppMode::BOOT;
 // ========== Shared Tracking Data (Core 1 -> Core 0) ==========
 struct SharedTrackingData {
   float pan, tilt;                // Current angles (radians, unwrapped)
-  int panChannel_us;            // Current pan microseconds
-  int tiltChannel_us;           // Current tilt microseconds
-  bool gyroStable;              // Gyro calibration status
-  volatile uint32_t frameCount; // For timing diagnostics
+  float calGx, calGy, calGz;      // Calibrated gyro (deg/s) for on-screen debugging
+  int panChannel_us;              // Current pan microseconds
+  int tiltChannel_us;             // Current tilt microseconds
+  bool gyroStable;                // Gyro calibration status
+  volatile uint32_t frameCount;   // For timing diagnostics
 };
 
-SharedTrackingData sharedData = {0, 0, 1500, 1500, false, 0};
+SharedTrackingData sharedData = {0, 0, 0, 0, 0, 1500, 1500, false, 0};
 SemaphoreHandle_t dataMutex;
 
 // ========== I2C Mutex (shared bus: IMU + Touch) ==========
@@ -151,13 +152,16 @@ void trackingTask(void* parameter) {
         if (IMU_DEBUG_ENABLED && (++imuDebugCounter % 10 == 0)) {
           float pan_t, tilt_t, unused_t;
           orientation.getAngles(pan_t, tilt_t, unused_t);
+          float levelX_t, levelY_t;
+          orientation.getLevelVector(levelX_t, levelY_t);
           float ox, oy, oz;
           gyroCal.getOffsets(ox, oy, oz);
-          Serial.printf("IMU| raw:%6.1f %6.1f %6.1f | cal:%6.2f %6.2f %6.2f | off:%6.1f %6.1f %6.1f | Pan:%6.1f Tilt:%6.1f | %s\n",
+          Serial.printf("IMU| raw:%6.1f %6.1f %6.1f | cal:%6.2f %6.2f %6.2f | off:%6.1f %6.1f %6.1f | Pan:%6.1f Tilt:%6.1f | Lx:%6.1f Ly:%6.1f | %s\n",
             rawGx, rawGy, rawGz,
             gx, gy, gz,
             ox, oy, oz,
             pan_t * HtConfig::RAD2DEG, tilt_t * HtConfig::RAD2DEG,
+            levelX_t * HtConfig::RAD2DEG, levelY_t * HtConfig::RAD2DEG,
             gyroCal.isStable() ? "STABLE" : "cal...");
         }
       }
@@ -186,6 +190,9 @@ void trackingTask(void* parameter) {
       if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(1)) == pdTRUE) {
         sharedData.pan = pan;
         sharedData.tilt = tilt;
+        sharedData.calGx = gx;
+        sharedData.calGy = gy;
+        sharedData.calGz = gz;
         sharedData.panChannel_us = panUs;
         sharedData.tiltChannel_us = tiltUs;
         sharedData.gyroStable = gyroCal.isStable();
@@ -217,6 +224,7 @@ void displayTask(void* parameter) {
 
   while (true) {
     float pan, tilt;
+    float calGx, calGy, calGz;
     int panUs, tiltUs;
     bool gyroStable;
 
@@ -224,6 +232,9 @@ void displayTask(void* parameter) {
     if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
       pan = sharedData.pan;
       tilt = sharedData.tilt;
+      calGx = sharedData.calGx;
+      calGy = sharedData.calGy;
+      calGz = sharedData.calGz;
       panUs = sharedData.panChannel_us;
       tiltUs = sharedData.tiltChannel_us;
       gyroStable = sharedData.gyroStable;
@@ -233,8 +244,10 @@ void displayTask(void* parameter) {
       continue;
     }
 
-    float panDeg = pan * HtConfig::RAD2DEG;
-    float tiltDeg = tilt * HtConfig::RAD2DEG;
+    float levelX, levelY;
+    orientation.getLevelVector(levelX, levelY);
+    float levelXDeg = levelX * HtConfig::RAD2DEG;
+    float levelYDeg = levelY * HtConfig::RAD2DEG;
 
     const HeadtrackerSettings& s = settings.get();
 
@@ -256,8 +269,8 @@ void displayTask(void* parameter) {
       }
 
       case AppMode::NORMAL:
-        display.drawTrackingScreen(panDeg, tiltDeg,
-                                    s.panGain, s.tiltGain,
+        display.drawTrackingScreen(levelXDeg, levelYDeg,
+                                    calGx, calGy, calGz,
                                     gyroStable, battery.getVoltage());
         break;
 

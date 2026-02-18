@@ -68,8 +68,8 @@ void Display::drawBootScreen(float calibProgress, const char* version) {
   sprite.pushSprite(0, 0);
 }
 
-void Display::drawTrackingScreen(float panAngleDeg, float tiltAngleDeg,
-                                  float panGain, float tiltGain,
+void Display::drawTrackingScreen(float levelXDeg, float levelYDeg,
+                                  float calGx, float calGy, float calGz,
                                   bool gyroStable, float voltage) {
   sprite.fillSprite(COLOR_BG);
 
@@ -78,17 +78,21 @@ void Display::drawTrackingScreen(float panAngleDeg, float tiltAngleDeg,
   drawCrosshair(CX, CY, trackRadius);
 
   // Tracking dot
-  drawTrackingDot(panAngleDeg, tiltAngleDeg, trackRadius);
+  drawTrackingDot(levelXDeg, levelYDeg, trackRadius);
 
   // Power arc at top
   drawPowerArc(voltage);
 
-  // Gain values (bottom area)
+  // Debug values (bottom area)
   sprite.setTextSize(1);
   sprite.setTextColor(COLOR_DIM);
-  char gainStr[32];
-  snprintf(gainStr, sizeof(gainStr), "P:%.1f  T:%.1f", panGain, tiltGain);
-  sprite.drawString(gainStr, CX, 200);
+  char line1[48];
+  snprintf(line1, sizeof(line1), "Lx:%5.1f  Ly:%5.1f", levelXDeg, levelYDeg);
+  sprite.drawString(line1, CX, 196);
+
+  char line2[48];
+  snprintf(line2, sizeof(line2), "G:%5.1f %5.1f %5.1f", calGx, calGy, calGz);
+  sprite.drawString(line2, CX, 210);
 
   // Status dot and label
   drawStatusDot(gyroStable, DisplayMode::NORMAL);
@@ -191,7 +195,7 @@ void Display::drawCrosshair(int cx, int cy, int radius) {
 }
 
 void Display::drawTrackingDot(float panDeg, float tiltDeg, int radius) {
-  // Map angle to pixel position
+  // Map level angle to pixel position
   // +/-90 degrees maps to full radius
   float maxDeg = 90.0f;
   int dotX = CX + (int)(panDeg / maxDeg * radius);
