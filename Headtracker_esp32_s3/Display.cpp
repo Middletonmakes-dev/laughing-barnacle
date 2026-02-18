@@ -1,7 +1,8 @@
 // Display.cpp - GC9A01 round display rendering implementation
 #include "Display.h"
 
-Display::Display() : tft(), sprite(&tft), currentMode(DisplayMode::BOOT) {
+Display::Display() : tft(), sprite(&tft), currentMode(DisplayMode::BOOT),
+                     levelEdgeLock(false), levelLockXDeg(0.0f), levelLockYDeg(0.0f) {
 }
 
 void Display::begin() {

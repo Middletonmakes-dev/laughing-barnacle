@@ -52,6 +52,11 @@ private:
   TFT_eSprite sprite;  // Double-buffered sprite for flicker-free updates
   DisplayMode currentMode;
 
+  // Spirit-level edge lock state (prevents circling near extreme tilt)
+  bool levelEdgeLock;
+  float levelLockXDeg;
+  float levelLockYDeg;
+
   // Screen center
   static const int CX = 120;
   static const int CY = 120;
