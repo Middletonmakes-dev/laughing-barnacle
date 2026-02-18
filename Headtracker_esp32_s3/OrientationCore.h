@@ -129,10 +129,6 @@ private:
   float levelAxisYBody[3];
   bool levelBasisValid;
 
-  // Low-pass gravity estimate directly from accelerometer for robust UI leveling
-  float accelGravBody[3];
-  bool accelGravValid;
-
   // ---- Quaternion math helpers (static, pure functions) ----
 
   // Rotate vector v by quaternion q: out = q * v * conj(q)

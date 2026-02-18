@@ -241,14 +241,12 @@ Orientation::Orientation()
     offsetPan(0.0f), offsetTilt(0.0f),
     rawLevelX(0.0f), rawLevelY(0.0f),
     levelOffsetX(0.0f), levelOffsetY(0.0f),
-    levelBasisValid(false), accelGravValid(false) {
+    levelBasisValid(false) {
   fwdBody[0] = 1.0f; fwdBody[1] = 0.0f; fwdBody[2] = 0.0f;
   refFwdWorld[0] = 1.0f; refFwdWorld[1] = 0.0f; refFwdWorld[2] = 0.0f;
   refGravBody[0] = 0.0f; refGravBody[1] = 0.0f; refGravBody[2] = -1.0f;
   levelAxisXBody[0] = 1.0f; levelAxisXBody[1] = 0.0f; levelAxisXBody[2] = 0.0f;
   levelAxisYBody[0] = 0.0f; levelAxisYBody[1] = 1.0f; levelAxisYBody[2] = 0.0f;
-  accelGravBody[0] = 0.0f; accelGravBody[1] = 0.0f; accelGravBody[2] = -1.0f;
-  accelGravValid = false;
 }
 
 void Orientation::begin(float samplePeriodSec) {
@@ -271,8 +269,6 @@ void Orientation::begin(float samplePeriodSec) {
   refGravBody[0] = 0.0f; refGravBody[1] = 0.0f; refGravBody[2] = -1.0f;
   levelAxisXBody[0] = 1.0f; levelAxisXBody[1] = 0.0f; levelAxisXBody[2] = 0.0f;
   levelAxisYBody[0] = 0.0f; levelAxisYBody[1] = 1.0f; levelAxisYBody[2] = 0.0f;
-  accelGravBody[0] = 0.0f; accelGravBody[1] = 0.0f; accelGravBody[2] = -1.0f;
-  accelGravValid = false;
 }
 
 void Orientation::update(float gxDeg, float gyDeg, float gzDeg,
@@ -299,49 +295,28 @@ void Orientation::update(float gxDeg, float gyDeg, float gzDeg,
   float gravBody[3];
   rotateVectorByQuat(qConj, gravWorld, gravBody);
 
-  // Build low-pass gravity estimate directly from accelerometer (body frame).
-  // This keeps UI bubble independent from gyro/yaw drift and magnetometer absence.
-  float accNorm = sqrtf(ax * ax + ay * ay + az * az);
-  if (accNorm > 1e-6f) {
-    float accNx = ax / accNorm;
-    float accNy = ay / accNorm;
-    float accNz = az / accNorm;
-
-    if (accNorm >= HtConfig::LEVEL_UI_ACCEL_NORM_MIN &&
-        accNorm <= HtConfig::LEVEL_UI_ACCEL_NORM_MAX) {
-      float a = HtConfig::LEVEL_UI_ACCEL_LPF_ALPHA;
-      accelGravBody[0] = (1.0f - a) * accelGravBody[0] + a * accNx;
-      accelGravBody[1] = (1.0f - a) * accelGravBody[1] + a * accNy;
-      accelGravBody[2] = (1.0f - a) * accelGravBody[2] + a * accNz;
-
-      float gLpNorm = sqrtf(accelGravBody[0]*accelGravBody[0] +
-                            accelGravBody[1]*accelGravBody[1] +
-                            accelGravBody[2]*accelGravBody[2]);
-      if (gLpNorm > 1e-6f) {
-        accelGravBody[0] /= gLpNorm;
-        accelGravBody[1] /= gLpNorm;
-        accelGravBody[2] /= gLpNorm;
-        accelGravValid = true;
-      }
-    }
-  }
-
-  const float* uiGrav = accelGravValid ? accelGravBody : gravBody;
-
   if (levelBasisValid) {
-    // Project gravity onto re-level tangent axes.
-    float dotRef = uiGrav[0] * refGravBody[0] +
-                   uiGrav[1] * refGravBody[1] +
-                   uiGrav[2] * refGravBody[2];
-    float sinX = uiGrav[0] * levelAxisXBody[0] +
-                 uiGrav[1] * levelAxisXBody[1] +
-                 uiGrav[2] * levelAxisXBody[2];
-    float sinY = uiGrav[0] * levelAxisYBody[0] +
-                 uiGrav[1] * levelAxisYBody[1] +
-                 uiGrav[2] * levelAxisYBody[2];
+    // Use gravity error vector (cross of reference/current gravity)
+    // then project onto re-level tangent axes. This avoids axis coupling
+    // for larger tilts and remains yaw-independent.
+    float errX = refGravBody[1] * gravBody[2] - refGravBody[2] * gravBody[1];
+    float errY = refGravBody[2] * gravBody[0] - refGravBody[0] * gravBody[2];
+    float errZ = refGravBody[0] * gravBody[1] - refGravBody[1] * gravBody[0];
 
-    rawLevelX = atan2f(sinX, dotRef);
-    rawLevelY = atan2f(sinY, dotRef);
+    float levelSinX = errX * levelAxisXBody[0] +
+                      errY * levelAxisXBody[1] +
+                      errZ * levelAxisXBody[2];
+    float levelSinY = errX * levelAxisYBody[0] +
+                      errY * levelAxisYBody[1] +
+                      errZ * levelAxisYBody[2];
+
+    if (levelSinX > 1.0f) levelSinX = 1.0f;
+    if (levelSinX < -1.0f) levelSinX = -1.0f;
+    if (levelSinY > 1.0f) levelSinY = 1.0f;
+    if (levelSinY < -1.0f) levelSinY = -1.0f;
+
+    rawLevelX = asinf(levelSinX);
+    rawLevelY = asinf(levelSinY);
   }
 
   // Rotate fwdBody by current quaternion to get current forward in world frame
@@ -475,18 +450,12 @@ void Orientation::reLevel() {
   float gravBody2[3];
   rotateVectorByQuat(qConj2, gravWorld2, gravBody2);
 
-  // Normalize reference gravity (prefer accel LP estimate if valid)
-  float gRef[3] = {gravBody2[0], gravBody2[1], gravBody2[2]};
-  if (accelGravValid) {
-    gRef[0] = accelGravBody[0];
-    gRef[1] = accelGravBody[1];
-    gRef[2] = accelGravBody[2];
-  }
-  float gNorm = sqrtf(gRef[0]*gRef[0] + gRef[1]*gRef[1] + gRef[2]*gRef[2]);
+  // Normalize reference gravity
+  float gNorm = sqrtf(gravBody2[0]*gravBody2[0] + gravBody2[1]*gravBody2[1] + gravBody2[2]*gravBody2[2]);
   if (gNorm > 1e-6f) {
-    refGravBody[0] = gRef[0] / gNorm;
-    refGravBody[1] = gRef[1] / gNorm;
-    refGravBody[2] = gRef[2] / gNorm;
+    refGravBody[0] = gravBody2[0] / gNorm;
+    refGravBody[1] = gravBody2[1] / gNorm;
+    refGravBody[2] = gravBody2[2] / gNorm;
   }
 
   // Build tangent basis at reference gravity direction

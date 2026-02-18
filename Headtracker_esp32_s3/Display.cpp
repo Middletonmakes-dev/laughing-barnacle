@@ -196,38 +196,6 @@ void Display::drawCrosshair(int cx, int cy, int radius) {
 }
 
 void Display::drawTrackingDot(float panDeg, float tiltDeg, int radius) {
-  // Small deadband to reduce jitter while holding still
-  if (fabs(panDeg) < HtConfig::LEVEL_UI_DEADBAND_DEG) panDeg = 0.0f;
-  if (fabs(tiltDeg) < HtConfig::LEVEL_UI_DEADBAND_DEG) tiltDeg = 0.0f;
-
-  // Edge-lock behavior to avoid circling when level approaches singular/extreme poses
-  float magDeg = sqrtf(panDeg * panDeg + tiltDeg * tiltDeg);
-  if (magDeg > HtConfig::LEVEL_UI_MAX_DEG) {
-    float norm = max(1e-6f, magDeg);
-    panDeg = panDeg / norm * HtConfig::LEVEL_UI_MAX_DEG;
-    tiltDeg = tiltDeg / norm * HtConfig::LEVEL_UI_MAX_DEG;
-    magDeg = HtConfig::LEVEL_UI_MAX_DEG;
-  }
-  if (!levelEdgeLock && magDeg >= HtConfig::LEVEL_UI_EDGE_LOCK_ENTER_DEG) {
-    levelEdgeLock = true;
-    float norm = max(1e-6f, magDeg);
-    float clampMag = min(magDeg, 90.0f);
-    levelLockXDeg = panDeg / norm * clampMag;
-    levelLockYDeg = tiltDeg / norm * clampMag;
-  } else if (levelEdgeLock && magDeg <= HtConfig::LEVEL_UI_EDGE_LOCK_EXIT_DEG) {
-    levelEdgeLock = false;
-  }
-
-  // Always clear lock near center after re-level to avoid stale edge direction
-  if (magDeg < 5.0f) {
-    levelEdgeLock = false;
-  }
-
-  if (levelEdgeLock) {
-    panDeg = levelLockXDeg;
-    tiltDeg = levelLockYDeg;
-  }
-
   // Map level angle to pixel position
   // +/-90 degrees maps to full radius
   float maxDeg = 90.0f;
